@@ -1,3 +1,4 @@
+#As the help of chat-gpt was taken to understand formatiing, but I didn't login so after machine going to sleep chat historty of chat-gpt has been not saved.
 #!/bin/sh
 #Here we will implement the same process like did in finder.sh
 
