@@ -26,3 +26,7 @@ to synchronize after cloning and before starting each assignment, as discussed i
 As a part of the assignment instructions, you will setup your assignment repo to perform automated testing using github actions.  See [this page](https://github.com/cu-ecen-aeld/aesd-assignments/wiki/Setting-up-Github-Actions) for details.
 
 Note that the unit tests will fail on this repository, since assignments are not yet implemented.  That's your job :) 
+
+I have used Gemini for the assistance of making writer.c file and it's Makefile: https://gemini.google.com/app/5a4d22754af49869
+
+For assignment 3 I have used gemini here is the link to the chat: https://gemini.google.com/share/10e8b19ef262
