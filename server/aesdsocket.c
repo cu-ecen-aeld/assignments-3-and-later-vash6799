@@ -93,7 +93,7 @@ int main(int argc, char *argv[]) {
         if (client_fd == -1) continue;
 
         char client_ip[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
+        inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN); //This converts the client's raw IP address (in binary) into a human-readable string
         syslog(LOG_INFO, "Accepted connection from %s", client_ip);
 
         // 1. Open file for appending AND reading
@@ -116,7 +116,7 @@ int main(int argc, char *argv[]) {
         }
         
         // 3. IMPORTANT: Flush stream to disk before reading
-        fflush(fp);
+        fflush(fp); //It is used to force that data out of the RAM buffer and into the actual file on disk.
         fseek(fp, 0, SEEK_SET);
 
         // 4. Send the ENTIRE file content back to the client

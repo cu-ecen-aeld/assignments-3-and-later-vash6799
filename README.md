@@ -30,3 +30,5 @@ Note that the unit tests will fail on this repository, since assignments are not
 I have used Gemini for the assistance of making writer.c file and it's Makefile: https://gemini.google.com/app/5a4d22754af49869
 
 For assignment 3 I have used gemini here is the link to the chat: https://gemini.google.com/share/10e8b19ef262
+
+For assignment 5 part 1 to create server directory and write aesdsocket.c I took help of GEMINI help the link to chat is: https://gemini.google.com/share/a8b1d6a596ef
