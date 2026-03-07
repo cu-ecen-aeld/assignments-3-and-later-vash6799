@@ -5,6 +5,9 @@
  *      Author: Dan Walkes
  */
 
+#include "aesd-circular-buffer.h"
+#include <linux/mutex.h>
+
 #ifndef AESD_CHAR_DRIVER_AESDCHAR_H_
 #define AESD_CHAR_DRIVER_AESDCHAR_H_
 
@@ -28,6 +31,9 @@ struct aesd_dev
     /**
      * TODO: Add structure(s) and locks needed to complete assignment requirements
      */
+    struct aesd_circular_buffer circular_buffer;  // Stores the 10 most recent writes
+    struct aesd_buffer_entry partial_entry;       // Tracks incomplete writes (unterminated by \n)
+    struct mutex lock; 
     struct cdev cdev;     /* Char device structure      */
 };
 
