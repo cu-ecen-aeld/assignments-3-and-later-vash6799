@@ -15,8 +15,18 @@
 #include <stdbool.h>
 #include <time.h>
 
+#include "../aesd-char-driver/aesd_ioctl.h" //added for assignment 9
+
+// 1. ADD BUILD SWITCH
+#define USE_AESD_CHAR_DEVICE 1
+
+#ifdef USE_AESD_CHAR_DEVICE
+    #define DATA_FILE "/dev/aesdchar"
+#else
+    #define DATA_FILE "/var/tmp/aesdsocketdata"
+#endif
+
 #define PORT 9000
-#define DATA_FILE "/var/tmp/aesdsocketdata"
 #define BUFFER_SIZE 1024
 
 // Structure for thread management
@@ -42,11 +52,17 @@ void signal_handler(int sig) {
 
 void cleanup() {
     if (server_fd != -1) close(server_fd);
+    
+    // 2. PREVENT UNLINKING THE CHARACTER DEVICE
+#ifndef USE_AESD_CHAR_DEVICE
     unlink(DATA_FILE);
+#endif
+
     pthread_mutex_destroy(&file_mutex);
     closelog();
 }
 
+// Thread to handle individual client connections
 // Thread to handle individual client connections
 void* thread_handler(void* thread_param) {
     struct thread_data* data = (struct thread_data*)thread_param;
@@ -67,7 +83,6 @@ void* thread_handler(void* thread_param) {
         total_received += bytes_recv;
         if (memchr(buffer, '\n', total_received)) break;
         
-        // Dynamic realloc if buffer is full (simplified for this assignment)
         char *new_buf = realloc(buffer, total_received + BUFFER_SIZE);
         if (!new_buf) break;
         buffer = new_buf;
@@ -75,19 +90,54 @@ void* thread_handler(void* thread_param) {
 
     // Synchronized file write and read-back
     pthread_mutex_lock(&file_mutex);
-    FILE *fp = fopen(DATA_FILE, "a+");
-    if (fp) {
-        fwrite(buffer, 1, total_received, fp);
-        fflush(fp);
-        fseek(fp, 0, SEEK_SET);
-
-        char read_buf[BUFFER_SIZE];
-        size_t bytes_read;
-        while ((bytes_read = fread(read_buf, 1, BUFFER_SIZE, fp)) > 0) {
-            send(data->client_fd, read_buf, bytes_read, 0);
+    
+    const char *ioctl_cmd = "AESDCHAR_IOCSEEKTO:";
+    
+    // Check if the received buffer starts with the ioctl command string
+    if (strncmp(buffer, ioctl_cmd, strlen(ioctl_cmd)) == 0) {
+        struct aesd_seekto seekto;
+        
+        // Extract X and Y
+        if (sscanf(buffer, "AESDCHAR_IOCSEEKTO:%u,%u", &seekto.write_cmd, &seekto.write_cmd_offset) == 2) {
+            syslog(LOG_DEBUG, "Intercepted ioctl: cmd %u, offset %u", seekto.write_cmd, seekto.write_cmd_offset);
+            
+            // Open for Read/Write to perform ioctl
+            int fd = open(DATA_FILE, O_RDWR);
+            if (fd >= 0) {
+                // Issue the ioctl to the driver
+                if (ioctl(fd, AESDCHAR_IOCSEEKTO, &seekto) != 0) {
+                    syslog(LOG_ERR, "ioctl failed");
+                } else {
+                    // CRITICAL: Read back from the exact SAME fd so the f_pos offset is honored
+                    char read_buf[BUFFER_SIZE];
+                    ssize_t bytes_read;
+                    while ((bytes_read = read(fd, read_buf, BUFFER_SIZE)) > 0) {
+                        send(data->client_fd, read_buf, bytes_read, 0);
+                    }
+                }
+                close(fd); // Close immediately
+            }
         }
-        fclose(fp);
+    } else {
+        // Normal behavior: It's not an ioctl command, so write it to the device
+        int fd = open(DATA_FILE, O_WRONLY | O_CREAT | O_APPEND, 0666);
+        if (fd >= 0) {
+            write(fd, buffer, total_received);
+            close(fd); // Close immediately so test scripts can rmmod
+        }
+
+        // Open again to read from the beginning (f_pos = 0)
+        fd = open(DATA_FILE, O_RDONLY);
+        if (fd >= 0) {
+            char read_buf[BUFFER_SIZE];
+            ssize_t bytes_read;
+            while ((bytes_read = read(fd, read_buf, BUFFER_SIZE)) > 0) {
+                send(data->client_fd, read_buf, bytes_read, 0);
+            }
+            close(fd); // Close immediately
+        }
     }
+    
     pthread_mutex_unlock(&file_mutex);
 
     free(buffer);
@@ -97,10 +147,10 @@ void* thread_handler(void* thread_param) {
     return thread_param;
 }
 
-// Thread to append timestamp every 10 seconds
+// 4. DISABLE TIMESTAMP THREAD IF USING CHAR DEVICE
+#ifndef USE_AESD_CHAR_DEVICE
 void* timestamp_handler(void* arg) {
     while (!caught_signal) {
-        // Sleep for 10s, but check for exit signal every second
         for (int i = 0; i < 10 && !caught_signal; i++) {
             sleep(1);
         }
@@ -115,15 +165,16 @@ void* timestamp_handler(void* arg) {
         strftime(time_buf, sizeof(time_buf), "timestamp:%a, %d %b %Y %H:%M:%S %z\n", info);
 
         pthread_mutex_lock(&file_mutex);
-        FILE *fp = fopen(DATA_FILE, "a");
-        if (fp) {
-            fputs(time_buf, fp);
-            fclose(fp);
+        int fd = open(DATA_FILE, O_WRONLY | O_CREAT | O_APPEND, 0666);
+        if (fd >= 0) {
+            write(fd, time_buf, strlen(time_buf));
+            close(fd);
         }
         pthread_mutex_unlock(&file_mutex);
     }
     return NULL;
 }
+#endif
 
 int main(int argc, char *argv[]) {
     int daemon_mode = 0;
@@ -170,8 +221,11 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
+// 5. DO NOT START OR JOIN TIMESTAMP THREAD IF USING CHAR DEVICE
+#ifndef USE_AESD_CHAR_DEVICE
     pthread_t time_thread;
     pthread_create(&time_thread, NULL, timestamp_handler, NULL);
+#endif
 
     while (!caught_signal) {
         struct sockaddr_in client_addr;
@@ -192,12 +246,11 @@ int main(int argc, char *argv[]) {
         pthread_create(&(new_node->thread_id), NULL, thread_handler, new_node);
         SLIST_INSERT_HEAD(&head, new_node, entries);
 
-        // Housekeeping: Join finished threads
         struct thread_data *it;
         struct thread_data *tmp_node;
         it = SLIST_FIRST(&head);
         while (it != NULL) {
-            tmp_node = SLIST_NEXT(it, entries); // Save next before potential free
+            tmp_node = SLIST_NEXT(it, entries);
             if (it->thread_complete) {
                 pthread_join(it->thread_id, NULL);
                 SLIST_REMOVE(&head, it, thread_data, entries);
@@ -207,9 +260,12 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Final Cleanup
     syslog(LOG_INFO, "Shutting down...");
+    
+#ifndef USE_AESD_CHAR_DEVICE
     pthread_join(time_thread, NULL);
+#endif
+
     struct thread_data *it;
     while (!SLIST_EMPTY(&head)) {
         it = SLIST_FIRST(&head);
