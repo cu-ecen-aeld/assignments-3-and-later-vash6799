@@ -245,8 +245,8 @@ long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
     uint8_t index;
     int cmd_count = 0;
     long retval = 0;
+    int found = 0; // NEW: Flag to track if we successfully found the command
 
-    // Validate the magic number and command bounds
     if (_IOC_TYPE(cmd) != AESD_IOC_MAGIC) return -ENOTTY;
     if (_IOC_NR(cmd) > AESDCHAR_IOC_MAXNR) return -ENOTTY;
 
@@ -260,16 +260,17 @@ long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
                 return -ERESTARTSYS;
             }
 
-            // Iterate through the buffer to find the target command and calculate the offset
             AESD_CIRCULAR_BUFFER_FOREACH(entry, &dev->circular_buffer, index) {
                 if (entry->buffptr != NULL) {
                     if (cmd_count == seekto.write_cmd) {
-                        // Found the command, check if offset is within this command's size
+                        
+                        // Found the command! Check if offset is within bounds
                         if (seekto.write_cmd_offset >= entry->size) {
                             retval = -EINVAL; 
                         } else {
                             new_fpos += seekto.write_cmd_offset;
                             filp->f_pos = new_fpos;
+                            found = 1; // NEW: Mark as successfully found and set!
                         }
                         break;
                     }
@@ -278,8 +279,8 @@ long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
                 }
             }
 
-            // If we iterated through everything and didn't find the requested write_cmd index
-            if (cmd_count <= seekto.write_cmd && retval == 0) {
+            // NEW: If we never found the command index, return an error
+            if (!found && retval == 0) {
                 retval = -EINVAL; 
             }
 
@@ -292,6 +293,7 @@ long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
     return retval;
 }
+
 
 struct file_operations aesd_fops = {
     .owner =    THIS_MODULE,
