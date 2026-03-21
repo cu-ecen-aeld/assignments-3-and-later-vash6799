@@ -63,6 +63,7 @@ void cleanup() {
 }
 
 // Thread to handle individual client connections
+// Thread to handle individual client connections
 void* thread_handler(void* thread_param) {
     struct thread_data* data = (struct thread_data*)thread_param;
     char client_ip[INET_ADDRSTRLEN];
@@ -119,8 +120,6 @@ void* thread_handler(void* thread_param) {
         }
     } else {
         // Normal behavior: It's not an ioctl command, so write it to the device
-        
-        // 3. SEPARATE OPEN/CLOSE FOR WRITE AND READ TO AVOID FSEEK ISSUES
         int fd = open(DATA_FILE, O_WRONLY | O_CREAT | O_APPEND, 0666);
         if (fd >= 0) {
             write(fd, buffer, total_received);
