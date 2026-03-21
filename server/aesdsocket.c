@@ -15,6 +15,8 @@
 #include <stdbool.h>
 #include <time.h>
 
+#include "../aesd-char-driver/aesd_ioctl.h" //added for assignment 9
+
 // 1. ADD BUILD SWITCH
 #define USE_AESD_CHAR_DEVICE 1
 
@@ -88,21 +90,53 @@ void* thread_handler(void* thread_param) {
     // Synchronized file write and read-back
     pthread_mutex_lock(&file_mutex);
     
-    // 3. SEPARATE OPEN/CLOSE FOR WRITE AND READ TO AVOID FSEEK ISSUES
-    int fd = open(DATA_FILE, O_WRONLY | O_CREAT | O_APPEND, 0666);
-    if (fd >= 0) {
-        write(fd, buffer, total_received);
-        close(fd); // Close immediately so test scripts can rmmod
-    }
-
-    fd = open(DATA_FILE, O_RDONLY);
-    if (fd >= 0) {
-        char read_buf[BUFFER_SIZE];
-        ssize_t bytes_read;
-        while ((bytes_read = read(fd, read_buf, BUFFER_SIZE)) > 0) {
-            send(data->client_fd, read_buf, bytes_read, 0);
+    const char *ioctl_cmd = "AESDCHAR_IOCSEEKTO:";
+    
+    // Check if the received buffer starts with the ioctl command string
+    if (strncmp(buffer, ioctl_cmd, strlen(ioctl_cmd)) == 0) {
+        struct aesd_seekto seekto;
+        
+        // Extract X and Y
+        if (sscanf(buffer, "AESDCHAR_IOCSEEKTO:%u,%u", &seekto.write_cmd, &seekto.write_cmd_offset) == 2) {
+            syslog(LOG_DEBUG, "Intercepted ioctl: cmd %u, offset %u", seekto.write_cmd, seekto.write_cmd_offset);
+            
+            // Open for Read/Write to perform ioctl
+            int fd = open(DATA_FILE, O_RDWR);
+            if (fd >= 0) {
+                // Issue the ioctl to the driver
+                if (ioctl(fd, AESDCHAR_IOCSEEKTO, &seekto) != 0) {
+                    syslog(LOG_ERR, "ioctl failed");
+                } else {
+                    // CRITICAL: Read back from the exact SAME fd so the f_pos offset is honored
+                    char read_buf[BUFFER_SIZE];
+                    ssize_t bytes_read;
+                    while ((bytes_read = read(fd, read_buf, BUFFER_SIZE)) > 0) {
+                        send(data->client_fd, read_buf, bytes_read, 0);
+                    }
+                }
+                close(fd); // Close immediately
+            }
         }
-        close(fd); // Close immediately
+    } else {
+        // Normal behavior: It's not an ioctl command, so write it to the device
+        
+        // 3. SEPARATE OPEN/CLOSE FOR WRITE AND READ TO AVOID FSEEK ISSUES
+        int fd = open(DATA_FILE, O_WRONLY | O_CREAT | O_APPEND, 0666);
+        if (fd >= 0) {
+            write(fd, buffer, total_received);
+            close(fd); // Close immediately so test scripts can rmmod
+        }
+
+        // Open again to read from the beginning (f_pos = 0)
+        fd = open(DATA_FILE, O_RDONLY);
+        if (fd >= 0) {
+            char read_buf[BUFFER_SIZE];
+            ssize_t bytes_read;
+            while ((bytes_read = read(fd, read_buf, BUFFER_SIZE)) > 0) {
+                send(data->client_fd, read_buf, bytes_read, 0);
+            }
+            close(fd); // Close immediately
+        }
     }
     
     pthread_mutex_unlock(&file_mutex);
