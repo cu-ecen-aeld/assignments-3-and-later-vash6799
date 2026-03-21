@@ -302,6 +302,8 @@ struct file_operations aesd_fops = {
 
     .llseek =   aesd_llseek,            // Added for Assignment 9
     .unlocked_ioctl = aesd_ioctl,       // Added for Assignment 9
+
+    .compat_ioctl = compat_ptr_ioctl,  //Added for assignment 9
 };
 
 static int aesd_setup_cdev(struct aesd_dev *dev)
